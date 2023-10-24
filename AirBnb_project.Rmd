@@ -1,0 +1,1044 @@
+---
+title: 'Come scegliere una struttura AirBnb nella città di Londra?'
+author: "Vanessa Verrina"
+output:
+  html_document: default
+---
+
+
+# 1. Introduzione
+La scelta di un hotel in una città grande come Londra può diventare un compito difficile. Pur avendo a disposizione diversi siti come Booking.com, Trivago ed AirBnb, la scelta è così ampia che è difficile decidere solo sulla base del prezzo e delle recensioni. <br>
+Per questo motivo abbiamo pensato che sarebbe utile avere a disposizione un altro parametro che possa facilitare la scelta, ovvero, il livello di sicurezza dei vari quartieri di Londra. <br>
+Supponiamo di voler utilizzare la piattaforma AirBnb per la prenotazione della struttura.
+E' importante conoscere, oltre all'affidabilita' dell'host, prezzi e recensioni, in quale zona della citta' le strutture si trovano e quale sia il tasso di criminalita' nella zona.<br>
+Dunque, l'obiettivo di questo studio e' quello di fornire una mappa utile a tale scelta, tenendo conto della distribuzione geografica degli alloggi divisi per tipologia (stanza privata o intero appartamento), il prezzo medio a persona ed il tasso di criminalita' nei vari quartieri della citta' di Londra.<br>
+Il progetto viene suddiviso in diverse fasi:
+
+* esplicitazione delle fonti dei dati utilizzati;
+
+* importazione dei dataset;
+
+* manipolazione, analisi descrittiva e rappresentazione grafica dei dataset analizzati e dei risultati ottenuti;
+
+* creazione di una mappa interattiva come sintesi delle analisi precedenti.
+
+L'output generato e' in formato HTML, al fine di preservare l'interattivita' della mappa finale.
+
+# 2. Fonti dei dati
+
+Ai fini del nostro studio, abbiamo incrociato i dati di AirBnb relativi all'anno 2022 con i dati sul tasso di criminalita' nei 33 quartieri di Londra forniti dalla London Metropolitan Police per lo stesso periodo.
+
+
+## 2.1 Dati Tasso di Criminalita'
+
+I dati sul tasso di criminalita' nella citta' di Londra sono stati estratti dal sito della Metropolitan Police di Londra.
+Il periodo preso in considerazione va da Febbraio 2022 a Gennaio 2023.
+
+In particolare, ci siamo concentrati su tutti i crimini contro le persone per ogni quartiere di Londra. Tra questi figurano:
+
+* ${Knife~Crimes}$, ovvero ogni atto criminale commesso utilizzando uno strumento da taglio come arma. Questa tipologia di crimini si e' rivelata essere in rapida crescita negli ultimi anni nella citta' di Londra, divenendo una vera e propria emergenza.
+
+* ${Theft}$, categoria che include reati come furto, scippo e borseggio.
+
+* ${Robbery}$, ovvero rapine che, a differenza della categoria precedente, prevedono la minaccia esplicita o la violenza.
+
+* ${Violence~against~person}$, categoria che include aggressioni fisiche e verbali, molestie ed omicidi.
+
+* ${Sexual~offences}$, ovvero crimini a sfondo sessuale che vanno dalla molestia sessuale allo stupro.
+ 
+
+Fonte: <https://public.tableau.com/app/profile/metropolitan.police.service/viz/MonthlyCrimeDataNewCats/Coversheet>.
+
+## 2.2 Dati AirBnb
+
+I dati riguardanti le strutture AirBnb provengono da Inside AirBnb. Inside AirBnb è un sito che fornisce dati in modo tale da evidenziare l'impatto che ha Airbnb nell'ambito della locazione di breve e medio periodo.
+I dati rappresentano uno snapshot a Dicemebre 2022. Come gia' menzionato, la città scelta e' Londra.
+I file utilizzati sono due:
+
+ * **neighbourhoods.geojson** - localizzazione delle aree
+ 
+ * **listings-2.csv** - lista delle attrezzature presenti su Airbnb
+ 
+Le variabili che abbiamo ritenuto utili alla nostra analisi sono le seguenti:
+   
+   * ${neighbourhood~cleansed}$ - quartieri di Londra;
+   
+   * ${latitude}$ - latitudine;
+   
+   * ${longitude}$ - longitudine;
+   
+   * ${room~type}$ - tipologia di alloggio;
+   
+   * ${accommodates}$ - numero di persone che ogni alloggio può ospitare;
+   
+   * ${bedrooms}$ - capacita' della struttura, ovvero numero di camere da letto presenti;
+   
+   * ${price}$ - prezzo;
+   
+   * ${review~scores: rating/accuracy/cleanliness/checkin/communication/locatiom/value}$ - valutazione data alle varie strutture dagli ospiti.
+   
+Fonte: <http://insideairbnb.com/get-the-data/>.
+
+
+## 2.3 Tasso di cambio USD/EUR
+
+Volendo fornire i prezzi degli alloggi in Euro, abbiamo effettuato il cambio Dollaro-Euro riferendoci al tasso sempre aggiornato ed utilizzando la libreria priceR.
+
+Fonte: <https://exchangerate.host/#/>.
+
+
+# 3. Setup della directory
+
+Prima di mandare in esecuzione lo script, abbiamo rimosso le variabili create nei runs precendenti e il set up della directory in base all'autore che manda in esecuzione lo script.
+
+```{r setup}
+# rimozione delle variabili create nei runs precedenti nell'ambiente di lavoro
+rm(list = ls())
+
+# commento setup della directory in base all'autore che manda in esecuzione lo script
+#aggiungere qui la propria directory 
+
+knitr::opts_knit$set(root.dir = "/Users/vaner/Desktop/Progetto Giannini-Verrina")
+#knitr::opts_knit$set(root.dir = "/Users/mariogiannini/Desktop/R Project")
+```
+
+
+# 4. Librerie utilizzate
+
+Di seguito vengono caricate le librerie utilizzate nel corso del progetto.
+
+```{r libraries, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(geojsonio)
+library(leaflet)
+library(leaflegend)
+library(priceR)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(data.table)
+library(treemapify)
+library(wesanderson)
+library(ggrepel)
+library(tidyr)
+library(plotrix)
+```
+
+
+
+# 5. Caricamento dei dati
+
+In questo step importiamo i dati in R e li salviamo in memoria.
+
+```{r get data, message=FALSE}
+
+# get airbnb data
+df_full <- read.csv("listings-2.csv")
+
+# get neighbourhoods json data
+geojson_data <- geojson_read("neighbourhoods.geojson", what = "sp")
+
+# get crime data
+dfc <- read.csv("crimes.csv")
+
+
+#get fx rate USD/EUR
+cur <- historical_exchange_rates("USD", to = "EUR",
+                                 start_date = Sys.Date(), end_date = Sys.Date())
+
+```
+
+
+
+
+# 6. Analisi dei dati sulla criminalità
+La prima analisi svolta è sul tasso di criminalità per ogni quartiere di Londra. 
+
+
+## 6.1 Visualizzazione dati a tabella
+
+Come primo step, sommiamo tutti i reati commessi per quartiere e li normalizziamo rispetto alla popolazione.
+Ricaviamo, dunque, il numero totale di reati commessi in ogni quartiere per 1000 abitanti (Crime Rate).
+
+```{r}
+#Sum crimes per neighbourhood
+dfc$tot_crime <- dfc %>%
+  select("knife_crimes","theft","robbery",
+         "violence_against_person","sexual_offences") %>%
+  subset %>%
+  rowSums
+
+
+#tot crimes per 1000 abitanti
+dfc$tot_crime_mille <- round(dfc$tot_crime/dfc$population*1000,2)
+
+
+#visualize the tot number of crimes per neighbourhood
+dfc1 <-dfc%>%
+  select("neighbourhood", "knife_crimes","theft","robbery",
+         "violence_against_person","sexual_offences", "tot_crime","tot_crime_mille")
+
+knitr::kable(dfc1, 
+             booktabs=T,
+             col.names = c("Neighbourhood", "Knife crimes","Theft","Robbery",
+         "Violence against person","Sexual Offences", "Total Crimes","Crime Rate"),
+             align = "c")%>%
+  row_spec(row = 0, color = "#FF5733")%>%
+  kable_styling()
+```
+
+<p class="text-right"> Fonte dati: Metropolitan Police </p>
+
+Effettuiamo di seguito una analisi statistica descrittiva di tipo generale sul dataset ottenuto.
+
+```{r}
+#summary(dfc)
+summary_df <- do.call(cbind, lapply(dfc, summary)) %>%
+  as.data.frame() %>%
+  select(knife_crimes,theft,robbery,violence_against_person,sexual_offences,tot_crime,tot_crime_mille) %>%
+  mutate_if(is.character, as.numeric) %>%
+        mutate_if(is.numeric, round, 2) %>%
+        as.data.frame()
+
+knitr::kable(summary_df,booktabs=T,align = "c")%>%
+    row_spec(row = 0, color = "#FF5733")%>%
+  kable_styling()
+
+```
+<p class="text-right"> Fonte dati: Metropolitan Police </p>
+
+
+## 6.2 Numero di crimini commessi per quertiere (Rappresentazione Grafica)
+
+Il grafico riportato evidenzia il numero totale di crimini commessi nei vari quartieri con la corrispettiva suddivisione per tipo di crimine.
+
+
+```{r crime neighbourhood, message=FALSE}
+
+#Sum crimes per neighbourhood creating a column tot_crime
+dfc$tot_crime <- dfc %>%
+  select("knife_crimes","theft","robbery",
+         "violence_against_person","sexual_offences") %>%
+  subset %>%
+  rowSums
+
+#tot crimes every 1000 people
+dfc$tot_crime_mille <- round(dfc$tot_crime/dfc$population*1000,2)
+
+
+#crimes per each neighbourhood
+dfc_for_pivot <-dfc%>%
+  select("neighbourhood", "knife_crimes","theft","robbery",
+         "violence_against_person","sexual_offences")
+
+dfc_pivot <- dfc_for_pivot %>% 
+  pivot_longer(
+    cols = !neighbourhood, 
+    names_to = "crimes_value", 
+    values_to = "sum")
+
+
+# create a plot to visualize crimes type by neighbourhood
+pall <- c("darkorchid","darkseagreen","gold","orangered","cyan4")
+
+ggplot(dfc_pivot, 
+       aes(x = reorder(neighbourhood, sum),
+           y = sum,
+           fill = crimes_value))+
+  geom_bar(stat = "identity",
+           width = 0.8)+
+  coord_flip() +
+  labs(y = "Number of Crimes", 
+       fill = "Crimes' type",
+       x = "Neighbourhood",
+       title = "Crimes in London",caption="Fonte dati: Metropolitan Police") +
+   scale_fill_manual(values=pall,breaks=c("knife_crimes","theft","robbery",
+         "violence_against_person","sexual_offences")) +      
+  theme_minimal()
+
+```
+
+
+## 6.3 Tasso di criminalità per quartiere (Rappresentazione Grafica)
+
+Il grafico riportato rappresenta il numero di crimini commessi ogni 1,000 abitanti per ogni quartiere della citta'.
+
+
+```{r crime neighbourhood1, message=FALSE}
+
+pal <- wes_palette("Darjeeling1", 100, type = "continuous")
+
+ggplot(dfc1, 
+       aes(fill =tot_crime_mille, 
+           area = tot_crime_mille, label=paste(neighbourhood,tot_crime_mille, sep = "\n")) )+
+  geom_treemap() + 
+  geom_treemap_text(colour = "black",
+                    place = "centre",
+                    size = 15,
+                    grow = F) +
+  scale_fill_gradientn(colours = pal, trans='reverse') + 
+  labs(title = "Crime Rate in London's neighbourhoods",
+       fill= "Rate",caption="Fonte dati: Metropolitan Police")
+
+```
+
+## 6.4 Suddivisione delle zone per gruppi in base al tasso di criminalita'
+Osservando i grafici precedenti, abbiamo deciso di suddividere i quartieri di Londra in quattro zone di rischio (Crime Level), in base al valore di Crime Rate.
+Le categorie create sono le seguenti:
+
+* ${High}$: contiene solo i quartiere di Westminster poiche' presenta un Crime Rate molto piu' alto rispetto agli altri quartieri (colore "red");
+* ${Medium~High}$: contiene tutti i quartieri con 40<Crime Rate<=53 (colore "orange");
+* ${Medium~Low}$: contiene tutti i quartieri con 30<Crime Rate<=40 (colore "yellow"); 
+* ${Low}$: contiene tutti i quartieri con 30<Crime Rate<=18 (colore "lightgreen").
+
+### 6.4.1 Rappresentazione grafica
+Il grafico riportato rappresenta il numero di crimini commessi per 1,000 abitanti per ogni quartiere. I diversi colori rappresentano le diverse zone di rischio.
+
+
+```{r crime neighbourhood2, message=FALSE}
+
+# create a column to divide neighbourhood by crime level groups
+dfc1$crime_level <- ifelse(dfc1$tot_crime_mille>53,"high",
+                           ifelse((40 < dfc1$tot_crime_mille) & (dfc1$tot_crime_mille <= 53),"medium high",
+                                  ifelse((30 < dfc1$tot_crime_mille) & (dfc1$tot_crime_mille <=40), "medium low",
+                                         "low")))
+#plot per crime level
+group_crime_level<-dfc1%>%
+  group_by(crime_level)
+
+palette <- c("red","orange","yellow","lightgreen")
+
+legend_ord <- levels(with(group_crime_level, reorder(crime_level, -tot_crime_mille)))
+
+data <- group_crime_level
+data <- data[order(data$tot_crime_mille,decreasing=TRUE),]
+
+
+# Add lines to the initial dataset
+data$id <- seq(1, nrow(data))
+
+data$neighbourhood_value= paste0(data$neighbourhood," ",round(data$tot_crime_mille,0))
+
+# Get the name and the y position of each label
+label_data <- data
+number_of_bar <- nrow(label_data)
+angle <- 90 - 360 * (label_data$id-0.5) /number_of_bar
+label_data$hjust <- ifelse( angle < -90, 1, 0)
+label_data$angle <- ifelse(angle < -90, angle+180, angle)
+
+
+ggplot(data, 
+       aes(x = reorder(neighbourhood_value, -tot_crime_mille),
+           y = tot_crime_mille,
+           fill = crime_level),
+       color=as.factor(crime_level), shape=as.factor(crime_level))+
+  geom_bar(stat = "identity",
+           width = 0.8) +
+  scale_fill_manual(values=palette,breaks=legend_ord) +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  labs(
+       fill = "Crime Level",
+       title = "Crime Levels in London",caption="Fonte dati: Metropolitan Police") +
+  theme_minimal()+
+  ylim(-80,210) +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) + 
+    coord_polar(start = 0) +
+    geom_text(data=label_data, aes(x=neighbourhood_value, y=tot_crime_mille, label= neighbourhood_value, hjust=hjust), color="black",
+              fontface="bold",alpha=0.6, size=2.5,angle= label_data$angle,inherit.aes = FALSE )
+
+
+```
+
+# 7. Analisi dei dati sulle strutture AirBnb
+
+## 7.1 Manipolazione dei dati
+Per prima cosa manipoliamo in dataset delle strutture presenti in AirBnb. Nella prima pulizia andremo ad escludere tutte le strutture che hanno prezzo, numero di stanze e capienza con un valore pari a zero oppure nullo (NA). Creiamo, inoltre, un score review medio e un prezzo medio a persona per ogni struttura. Infine, convertiamo i prezzi in EURO.
+
+```{r airbnb data, message=FALSE, warning=FALSE}
+
+# get as variable latest fx rate
+today_fx <- cur[1,2]
+
+# columns name
+col_names <- colnames(df_full)
+
+# dataset first 6 rows
+df_full_head <- head(df_full)
+
+
+# select columns needed
+df <- df_full %>%
+  select("name","neighbourhood_cleansed","latitude",
+         "longitude","room_type" ,"accommodates","bedrooms",
+         "price","review_scores_rating","review_scores_accuracy",
+         "review_scores_cleanliness","review_scores_checkin","review_scores_communication",
+         "review_scores_location","review_scores_value")
+
+# create an average rating score
+df$review_scores_avg <- df %>%
+  select("review_scores_rating","review_scores_communication","review_scores_cleanliness",
+         "review_scores_checkin","review_scores_communication",
+         "review_scores_location","review_scores_value") %>%
+  subset %>%
+  rowMeans %>% round(2)
+
+
+# convert dollar price to EUR price
+df$price_dollar <- gsub("\\$","",df$price)
+df$price_dollar <- as.numeric(df$price_dollar)
+df$price_eur <- round(df$price_dollar* today_fx,2)
+
+
+# keep rows with accommodates, price_eur and bedrooms !=0 and isNot NA 
+df$accommodates <- as.numeric(gsub(" ","",df$accommodates))
+df_sliced <- subset(df,(price_eur != 0) & (bedrooms != 0) & (accommodates != 0) &
+                      (!is.na(price_eur)) & (!is.na(bedrooms)) & (!is.na(accommodates))) 
+
+# get price/pp
+df_sliced$price_eur_pp <- ifelse(df_sliced$room_type == "Shared room",df_sliced$price_eur, round(df_sliced$price_eur/df_sliced$accommodates,2))
+
+# rename column neighborhood
+df_sliced <- df_sliced %>%
+  rename(neighbourhood = neighbourhood_cleansed) 
+
+df_sliced$counting <- 1
+
+# check NA in the neighbourhood
+NA_neighbourhood <- sum(is.na(df_sliced$neighbourhood))
+#print(paste0("Check NA on column neighbourhood: ",NA_neighbourhood))
+
+# all the neighbourhood
+neighbourhood_list <- unique(df_sliced$neighbourhood)
+#print(neighbourhood_list)
+
+#rename df_sliced_head
+dft <- df_sliced
+
+```
+
+
+
+## 7.2 Rappresentazione grafica delle strutture Airbnb per tipologia di alloggio.
+Nel seguente grafico a torta viene rappresentata la totalita' delle strutture AirBnb presenti a Londra, suddivise per tipologia di alloggio.
+
+```{r airbnb data1, message=FALSE, warning=FALSE}
+
+#Number of accomodations in London
+count_rooms <- dft %>%
+  summarise(count = n() )
+#print(paste0("The total number of AirBnb accomodations in London is ", count_rooms,"."))
+
+
+#Number of  accomodations by room types in London   
+dft_group_by_room_types <- dft %>%
+  group_by(room_type) %>%
+  summarise(counting = sum(counting))
+
+# Greater London room types breakdown bar chart
+dft_group_by_room_types$pct_counting <-  dft_group_by_room_types$counting/sum(dft_group_by_room_types$counting)
+
+
+pie_chart_title <- paste0("AirBnb accommodations in London\n", "Total number = ",count_rooms)
+#print(pie_chart_title)
+
+
+# Greater London room types breakdown pie chart
+colors <- c("gold","orangered","darkorchid","cyan4")
+
+ggplot(data = dft_group_by_room_types, aes(x = "", y = pct_counting, fill = room_type)) +
+  geom_bar(stat = 'identity',
+           width=1, color="white")+
+  geom_text(aes(label = scales::percent(pct_counting)),position = position_stack(vjust = 0.5),color="white",fontface = "bold")+
+  labs(title  = pie_chart_title,caption="Fonte dati: Inside Airbnb") +
+  theme(plot.title=element_text(hjust=1.7)) +
+  coord_polar("y", start=0) +
+  guides(fill = guide_legend(title = "Accommodation Type")) +
+  scale_fill_manual(values=colors)+
+  theme_void()
+
+```
+
+
+## 7.3 Ulteriore manipolazione dei dati 
+
+### 7.3.1 Selezione tipologia di alloggio
+Poiche' le camere condivise e gli hotels rappresentano meno dell'1% del totale, le analisi future si concentreranno solo su appartamenti (Entire home/apt) e stanze private (Private Room).
+
+```{r airbnb data2, message=FALSE, warning=FALSE}
+###########Drill down by Room Type and Num of Bedrooms
+# Accomodations type used for further analysis Entire home/apt and Private room
+dft1 <- subset(dft,(room_type == "Entire home/apt") | (room_type == "Private room"))
+```
+
+### 7.3.2 Analisi della capienza delle strutture del tipo "Private Room"
+
+Analizziamo dunque gli alloggi cosi' filtrati in base alla loro capienza, ovvero al numero di stanze (bedrooms) disponibili in ognuno.
+
+```{r airbnb data3, message=FALSE, warning=FALSE}
+# Breakdown Analysis by bedroooms
+# Private room
+
+df_sliced_single_room <- subset(dft1,(room_type == "Private room"))
+dft_group_by_private_room_bedroooms <- df_sliced_single_room %>%
+  group_by(bedrooms) %>%
+  summarise(counting = sum(counting))
+
+dft_group_by_private_room_bedroooms$pct <- sprintf(dft_group_by_private_room_bedroooms$counting/sum(dft_group_by_private_room_bedroooms$counting)*100,fmt = "%0.1f%%")
+
+data <- data.frame(dft_group_by_private_room_bedroooms, Percent=dft_group_by_private_room_bedroooms$pct)
+
+data <- data %>% select(bedrooms,Percent)
+
+knitr::kable(data, 
+             booktabs=T,
+             col.names = c("Capacity",
+                           "Percentage"),
+             align = "c",
+             caption = "Private Room")%>%
+  row_spec(row = 0, color = "#006666")%>%
+  kable_styling()
+```
+<p class="text-right"> Fonte dati: Inside Airbnb </p>
+
+Dalla tabella si deduce che quasi il 99% degli alloggi del tipo "Private Room" hanno 1 o 2 camere a disposizione.
+
+### 7.3.3 Analisi della capienza di strutture del tipo "Entire home/apt" 
+Ripetiamo l'analisi per la tipologia di alloggio "Entire home/apt".
+```{r airbnb data4, message=FALSE, warning=FALSE}
+# Entire home/apt
+df_sliced_apts <- subset(dft1,(room_type == "Entire home/apt"))
+
+
+dft_group_by_apts_bedroooms <- df_sliced_apts %>%
+  group_by(bedrooms) %>%
+  summarise(counting = sum(counting))
+
+dft_group_by_apts_bedroooms$pct <- sprintf(dft_group_by_apts_bedroooms $counting/sum(dft_group_by_apts_bedroooms $counting)*100,fmt = "%0.1f%%")
+
+data1 <- data.frame(dft_group_by_apts_bedroooms, Percent=dft_group_by_apts_bedroooms$pct)
+data1 <- data1 %>% select(bedrooms,Percent)
+
+
+knitr::kable(data1, 
+             booktabs=T,
+             col.names = c("Capacity",
+                           "Percentage"),
+             align = "c",
+             caption = "Entire home/apt")%>%
+  row_spec(row = 0, color = "#006666")%>%
+  kable_styling()
+
+```
+<p class="text-right"> Fonte dati: Inside Airbnb </p>
+
+Dalla tabella si deduce che piu' del 98% degli alloggi del tipo "Entire home/apt" hanno tra 1 e 4 camere a disposizione.
+
+### 7.3.4 Nuovo dataset
+A questo punto, filtriamo nuovamente il dataset prendendo in considerazione le stanze private con capienza 1 e 2 camere e gli appartmenti con capienza da 1 a 4 camere.
+
+```{r airbnb data6, message=FALSE, warning=FALSE}
+# Num of bedrooms used for further analysis Entire home/apt Num of bedrooms > = 4 and Private room Num of bedrooms >=2
+dft2 <- subset(dft1,(room_type == "Entire home/apt" & bedrooms >=1 & bedrooms <= 4) | (room_type == "Private room" & bedrooms >=1 & bedrooms <= 2))
+
+#Visualizzazione dataframe
+
+str(dft2)
+colnames(dft2)
+```
+
+Infine, effettuiamo un'analisi statistica descrittiva generale del nuovo dataset.
+
+```{r,message=FALSE, warning=FALSE}
+#summary(dft2)
+summary_df <- do.call(cbind, lapply(dft2, summary)) %>%
+  as.data.frame()
+summary_df <-summary_df[1:6,]
+
+
+summary_df1<- select(summary_df,accommodates,bedrooms,review_scores_rating,review_scores_accuracy,
+                      review_scores_cleanliness,review_scores_checkin) %>%
+  mutate_if(is.character, as.numeric) %>%
+        mutate_if(is.numeric, round, 2) %>%
+        as.data.frame()
+
+
+
+summary_df2<- select(summary_df,review_scores_communication,review_scores_location,
+                      review_scores_value,review_scores_avg,price_dollar,price_eur,price_eur_pp) %>%
+  mutate_if(is.character, as.numeric) %>%
+        mutate_if(is.numeric, round, 2) %>%
+        as.data.frame()
+
+knitr::kable(summary_df1,booktabs=T,align = "c")%>%
+    row_spec(row = 0, color = "#006666")%>%
+  kable_styling()
+
+
+knitr::kable(summary_df2,booktabs=T,align = "c")%>%
+    row_spec(row = 0, color = "#006666")%>%
+  kable_styling()
+
+
+```
+
+<p class="text-right"> Fonte dati: Inside AirBnb </p>
+
+
+### 7.3.5 Rappresentazione Grafica del nuovo dataset
+
+```{r airbnb data7, message=FALSE, warning=FALSE}
+# Greater London distribution by room types
+dft_group_by_room_types1 <- dft2 %>%
+  group_by(room_type) %>%
+  summarise(counting = sum(counting))
+#str(dft)
+
+count_rooms <- dft2 %>%
+  summarise(count = n() )
+
+dft_group_by_room_types1$pct_counting <-  dft_group_by_room_types1$counting/sum(dft_group_by_room_types1$counting)
+
+slices <- t(dft_group_by_room_types1[3])
+lbls <- paste0(round(slices/sum(slices) * 100, 2), "%")
+colors <- c("gold","darkorchid")
+
+pie3D(slices,
+      col = colors,
+      border="white",
+      labels=lbls,
+      explode=0.1,
+      main=paste0("AirBnb accommodations in London\n", "Total number = ",count_rooms))
+legend(.2, 1., c("Home/apt","Private Room"), cex = 0.7, fill = colors, box.lwd = 0,box.col = "white",bg = "white")
+
+
+```
+<p class="text-right"> Fonte dati: Inside Airbnb </p>
+
+## 7.4 Analisi della distribuzione geografica delle strutture AirBnb a Londra
+
+Con il nuovo dataset a disposizione, analizziamo come le strutture AirBnb sono distribuite tra i vari quartieri di Londra, distinguendo tra le due diverse tipologie di alloggio, "Private room" e "Entire home/apt".
+
+### 7.4.1 Visualizzazione dati a tabella
+
+```{r, message=FALSE, warning=FALSE}
+dft_group_by_room_types_area <- dft2 %>%
+  group_by(neighbourhood,room_type) %>%
+  summarise(counting = sum(counting))
+
+dft_group_by_area <- dft2 %>%
+  group_by(neighbourhood) %>%
+  summarise(counting_area = sum(counting))
+
+dft_group_by_room_types_area <- dft_group_by_room_types_area %>%
+  left_join(dft_group_by_area, by ='neighbourhood')
+
+dft_group_by_room_types_area$pct_counting <-  round(dft_group_by_room_types_area$counting/dft_group_by_room_types_area$counting_area*100,2)
+
+knitr::kable(dft_group_by_room_types_area, 
+             booktabs=T,
+             col.names = c("Neighbourhood",
+                           "Accomodation type","Count per Accommodation Type","Tot number of Accommodations per Neighbourhood","Percentage (%)"),
+             align = "c")%>%
+  row_spec(row = 0, color = "#006666")%>%
+  kable_styling() 
+```
+<p class="text-right"> Fonte Dati: Inside Airbnb </p>
+
+### 7.4.2 Visualizzazione grafica dei dati 
+
+
+```{r airbnb data8, message=FALSE, warning=FALSE}
+
+
+# Graph room types breakdown by neighbourhoods
+ggplot(dft_group_by_room_types_area, aes(x = reorder(factor(neighbourhood), counting_area),
+                                         y = counting, fill = factor(room_type,
+                                                                     levels = c("Entire home/apt","Private room","Shared room","Hotel room")))) +
+  geom_bar(position = position_stack(), stat = "identity", width = .7,col="white") +
+  guides(fill = guide_legend(title = "Accommodation Type")) +
+  labs(x = "Neighbourhoods", 
+       y = "Number of accommodations", 
+       title  = "Accommodations by neighbourhood and room type",caption = "Fonte dati: Inside Airbnb") +
+  coord_flip() +
+  geom_text(aes(label = paste0(round(pct_counting,2),"%")), position = position_stack(vjust = 0.5), size = 2)+
+  theme_minimal()
+
+
+```
+
+
+## 7.5 Analisi prezzi per quartiere
+
+In questa sezione analizzeremo la distribuzione dei prezzi delle strutture nei vari quartieri di Londra. La prima analisi descrittiva prende in considerazione i prezzi a persona per tutta la citta' di Londra.
+
+```{r}
+#Average price per person in London
+avg_price_london<-summarise (dft2,  
+                 mean_price_pp = round(mean (price_eur_pp),2), 
+                 max_price_pp=max(price_eur_pp),
+                 min_price_pp=min(price_eur_pp),
+                 median_price_pp= round(median (price_eur_pp),2),
+                 var=round(var(price_eur_pp),2),
+                 sd = round(sd (price_eur_pp),2),
+                 IQR = round(IQR(price_eur_pp),2))
+
+knitr::kable(avg_price_london,
+             booktabs=F,
+             col.names = c( "Mean","Max.","Min.","Median","Var.","SD","IQR"),
+             align = "c",
+             caption="Prices pp in Euro")%>%
+  row_spec(row = 0, color = "#006666")%>%
+  kable_styling()
+
+```
+<p class="text-right"> Fonte dati: Inside Airbnb </p>
+
+### 7.5.1 Analisi prezzi per neighbourhood and room type (Visualizzazione a tabella)
+
+L'analisi continua con una rappresentazione a tabella dei pricipali indicatori di analisi descrittiva per i prezzi a persona in ogni quartiere di Londra, distinguendo tra appartamenti e camere private.
+
+```{r,, message=FALSE, warning=FALSE}
+
+#Average price per person in different neighborhood for different room types 
+group_neigh_room_price <- dft2 %>% group_by(neighbourhood, room_type)
+
+avg_price<-summarise (group_neigh_room_price,  
+                 mean_price_pp = round(mean (price_eur_pp),2), 
+                 max_price_pp=max(price_eur_pp),
+                 min_price_pp=min(price_eur_pp),
+                 median_price_pp= round(median (price_eur_pp),2),
+                 var=round(var(price_eur_pp),2),
+                 sd = round(sd (price_eur_pp),2),
+                 IQR = round(IQR(price_eur_pp),2))
+      
+
+knitr::kable(avg_price,
+             booktabs=T,
+             col.names = c("Neighbourhood", "Accommodation Type",
+                           "Mean","Max.","Min.","Median","Var.","SD","IQR"),
+             align = "c",
+             caption="Prices pp in Euro per neighbourhood and accommodation type")%>%
+  row_spec(row = 0, color = "#006666")%>%
+  kable_styling()
+
+```
+<p class="text-right"> Fonte dati: Inside Airbnb </p>
+
+
+### 7.5.2 Analisi prezzi per quartiere (Visualizzazione grafica)
+Il seguente box plot con ordine descrescente rispetto alla mediana del prezzo medio a persona per quartiere fornisce una rappresentazione grafica del prezzo mediano per quartiere con i corrispettivi quartili ed outliers. Dal grafico emerge che le top 5 zone rispetto al loro prezzo mediano sono zone centrali della città.
+
+```{r,  message=FALSE, warning=FALSE}
+
+#Boxplots without Whiskers
+
+group_neigh_price <- dft2 %>% group_by(neighbourhood)
+
+ggplot(group_neigh_price, aes(x=reorder(neighbourhood,price_eur_pp), y=price_eur_pp, fill=price_eur_pp)) + 
+  geom_boxplot(fill='floralwhite', color="darkorchid4",
+              outlier.fill="#d6deff", outlier.shape=23)+
+               labs(title="Price pp by Neighbourhood", x="Neighbourhood", y = "Price pp (Euro)",
+               caption = "Fonte dati: Inside Airbnb") +
+  scale_fill_viridis_b() +
+  coord_flip()+
+  theme_light()
+```
+
+### 7.5.3 Plot della media ed errore standard del prezzo medio a persona per quartiere
+
+Nel grafico qui riportato viene rappresentato il prezzo medio a persona ed il suo relativo errore standard per ogni quartiere di Londra e per entrambe le tipologie di struttura. Dal grafico si deduce che gli appartamenti in quasi tutte le zone hanno un prezzo medio superiore alle camere private ma entrambe le tipologie di alloggio hanno uno standard error alto.
+
+
+
+```{r,  message=FALSE, warning=FALSE}
+pd <- position_dodge(0.2)
+ggplot(avg_price, 
+       aes(x=neighbourhood,  
+           y = mean_price_pp, 
+           group=room_type, 
+           color=room_type)) +
+  geom_point(position=pd, 
+             size = 3) +
+  geom_line(position = pd, 
+            size = .5) +
+  geom_errorbar(aes(ymin = mean_price_pp - sd, 
+                    ymax = mean_price_pp + sd), 
+                width = .1, 
+                position = pd, 
+                size = 1) +
+  #scale_y_continuous(label = scales::dollar) +
+  scale_color_brewer(palette="Set2") +
+  theme_minimal() +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+
+  labs(title = "Mean price pp by neighbourhood and room type",
+       caption = "Fonte dati: Inside Airbnb",
+       subtitle = "(mean +/- standard error)",
+       x = "Neighbourhood", 
+       y = " Mean price pp (Euro)",
+       color = "Room Type")
+```
+
+
+## 7.6 Analisi reviews per quartiere
+Analizzando i prezzi delle strutture AirBnb nei vari quartieri di Londra, e' emerso che le zone piu' care sembrano essere quelle centrali.
+A questo punto, ci siamo chiesti se posizione e prezzo delle varie strutture potessero in qualche modo influire sulla recensione fornita dagli ospiti delle strutture AirBnb.
+
+### 7.6.1 Visualizzazione a tabella
+Nella seguente tabella, riportiamo il valor medio delle reviews e la relativa standard deviation per quartiere. Dall'analisi emerge che le reviews in media sono molto simili nelle diverse zone della citta' e con una relativa standard deviation bassa.
+
+```{r, message=FALSE, warning=FALSE}
+avg_score_neigh <- dft2 %>%
+                   group_by(neighbourhood)
+
+
+avg_score <- summarise (avg_score_neigh, average_score = round(mean (review_scores_avg, na.rm=T),2),
+                        sd = round(sd (review_scores_avg, na.rm=T),2))
+
+kable(avg_score,booktabs=T,
+             col.names = c("Neighbourhood", "Mean review Score","SD"),
+             align = "c")%>%
+  row_spec(row = 0, color="darkorchid")%>%
+  kable_styling()
+
+```
+
+
+<p class="text-right"> Fonte dati: Inside Airbnb </p>
+
+
+### 7.6.2 Relazione prezzo-reviews per quartiere
+Questa analisi e' volta ad individuare, se presente, una correlazione tra le review ed i prezzi di ogni quartiere. 
+
+```{r, message=FALSE, warning=FALSE}
+#Calculate scatter plot with fit of a linear model
+
+dff<-data.frame(avg_score$neighbourhood,avg_score$average_score,avg_price$mean_price_pp)
+
+
+########PREZZO MEDIO PER NEIGHBOUROOD
+#Average price per person in different neighborhood
+group_neigh_price <- dft2 %>% group_by(neighbourhood)
+
+avg_price_neigh<-summarise (group_neigh_price,  
+                            mean_price_pp = round(mean (price_eur_pp,na.rm=T),2))
+
+df_for_lm <- avg_score %>% left_join(avg_price_neigh,by="neighbourhood")
+
+ml=lm(df_for_lm$average_score~df_for_lm$mean_price_pp, data=dff)
+
+lm_summary <- summary(ml)$coefficients 
+
+
+ggp <- ggplot(df_for_lm, aes(average_score, mean_price_pp)) +     
+  geom_point(size=2, col="orchid") +
+  xlab("Average Score")+ylab("Mean Price pp (Euro)")+
+  stat_smooth(method = "lm",
+              formula = y ~ x ,col="darkorchid") +
+  geom_text_repel(aes(label = neighbourhood)) +
+  labs(title="Average Score vs Mean Price pp",
+  caption = "Fonte dati: Inside Airbnb") +
+    theme_classic()
+ggp
+```
+
+#### 7.6.2.1 Test di ipotesi
+
+Utilizziamo a questo punto la funzione "summary.lm" per ottenere una lista delle summary statistics per il fit lineare ipotizzato.
+
+```{r,message=FALSE, warning=FALSE}
+
+lm_summary <- lm_summary %>%
+   as.data.frame() %>%
+  mutate_if(is.character, as.numeric) %>%
+        mutate_if(is.numeric, round, 3) %>%
+        as.data.frame()
+
+rownames(lm_summary) <- c("Intercept", "Slope")
+knitr::kable(lm_summary,booktabs=T,
+             align = "c")%>%
+    row_spec(row = 0, color = "darkorchid")%>%
+  kable_styling() %>% 
+  kable_material(c("striped", "hover"))
+
+```
+
+Facendo riferimento al coefficiente angolare, con un livello di confidenza del 5% si ha $p-value>\alpha$. Dunque, si deve accettare l'ipotesi nulla per cui $\beta=0$. Possiamo concludere che non c'e' relazione tra la variabile risposta (mean price pp) e la variabile esplicativa (review score).
+
+# 8 Mappa Interattiva
+
+La mappa interattiva rappresenta lo step finale della nostra analisi. Come promesso nell'introduzione, la mappa fornisce una visione completa della città di Londra con suddivisione in quartieri e caratteristiche per ogni zona analizzata. <br>
+Ci sono tre diversi livelli di lettura della mappa.
+
+[LIVELLO I: Scelta della zona in base al Crime Level]{.underline}
+
+I quartieri di Londra sono stati divisi in quattro categorie in base al tasso di criminalita', riconoscibili tramite i diversi colori:
+
+* ${rosso}$: high crime rate;
+
+* ${arancione}$: medium high crime level;
+
+* ${giallo}$: medium low crime level;
+
+* ${verde}$: low crime level.
+
+[LIVELLO II: Scelta della zona in base a numero di alloggi, prezzo medio pp e crime level]{.underline}
+
+Soffermandosi con il mouse su ogni quartiere, apparirà una finestra contenente le informazioni necessarie alla scelta della struttura, ovvero:
+  
+* Number of accommodations
+
+* Price/pp (Euro) - median
+
+* Price/pp (Euro) - mean
+
+* Price/pp (Euro) - sd
+
+* Crime Rate
+
+* Crime Level
+
+[LIVELLO III: Distribuzione geografica delle strutture AirBnb]{.underline}
+
+Ingrandendo la mappa in ogni quartiere, e' possibile vedere la posizione esatta di ogni struttura. Vengono, inoltre distinti i due diversi tipi di alloggio selezionati nella nostra analisi, ovvero Entire home/apt (cerchi blu) e Private room (cerchi rossi).
+
+```{r, message=FALSE, warning=FALSE}
+# create palette for accommodation type
+pal <- colorFactor(
+  palette = c("blue","darkred"),
+  domain = c("Entire home/apt","Private room"))
+
+pal2 <- colorFactor(
+  palette = c("red","lightgreen","orange","yellow"),
+  domain = c("high", "low","medium high","medium low"),
+  reverse=F)
+
+
+# create palette for crime level zone type
+dft2_for_color <-  select(dfc1,crime_level,neighbourhood)
+dft2_for_color$color_area <- ifelse(dfc1$crime_level == "high","red",
+                                    ifelse(dfc1$crime_level == "medium high","orange",
+                                           ifelse(dfc1$crime_level == "medium low","yellow",
+                                                  ifelse(dfc1$crime_level == "low","lightgreen","grey"))))
+
+dft2_for_color <- unique(dft2_for_color)
+
+area_color<- data.frame(geojson_data$neighbourhood)
+
+colnames(area_color)[1] = 'neighbourhood'
+
+area_color <-  area_color %>%
+  left_join(dft2_for_color, by ='neighbourhood')
+
+area_color <- area_color[order(area_color$neighbourhood),]
+
+pal1 <- colorFactor(
+  palette = c(area_color$color_area),
+  domain = c(area_color$neighbourhood))
+
+
+# create summary statistics
+descriptive_analysis <- dft2 %>% 
+  group_by(neighbourhood)
+
+descriptive_analysis_results <- (summarise (descriptive_analysis,
+                                            num_accomodation = sum(counting),
+                                            median_price = round(median (price_eur_pp),2),
+                                            average_price = round(mean (price_eur_pp),2),
+                                            sd = round(sd (price_eur_pp),2)))
+
+
+# create dataset based on json file order to get area's colours
+df_insight <- data.frame(geojson_data$neighbourhood)
+colnames(df_insight)[1] = 'neighbourhood'
+
+x1 <- select(descriptive_analysis_results,neighbourhood,num_accomodation)
+x2 <- select(descriptive_analysis_results,neighbourhood,median_price)
+x3 <- select(descriptive_analysis_results,neighbourhood,average_price)
+x4 <- select(descriptive_analysis_results,neighbourhood,sd)
+
+dfc1_for_graph <- select(dfc1,neighbourhood,tot_crime_mille,crime_level)
+
+df_insight_merged <- df_insight %>% left_join(x1,by="neighbourhood") %>% left_join(x2,by="neighbourhood") %>%
+  left_join(x3,by="neighbourhood") %>% left_join(x4,by="neighbourhood") %>% left_join(dfc1_for_graph,by="neighbourhood")
+
+###########
+
+addLegendCustom <- function(map, colors, labels, sizes, opacity = 0.5){
+  colorAdditions <- paste0(colors, "; border-radius: 50%; width:", sizes, "px; height:", sizes, "px")
+  labelAdditions <- paste0("<div style='display: inline-block;height: ", 
+                           sizes, "px;margin-top: 4px;line-height: ", sizes, "px;'>", 
+                           labels, "</div>")
+  return(addLegend(map, colors = colorAdditions, 
+                   labels = labelAdditions, opacity = opacity))
+}
+
+# get map
+labels <- sprintf(
+  "<strong>%s</strong><br/>Num of accommodations: %g</sup><br/>Price/pp (Euro) - median: %g</sup><br/>Price/pp (Euro) - mean: %g</sup><br/>Price/pp (Euro) - sd: %g</sup>
+  <br/>Crime Rate: %g</sup><br/>Crime Level: %s</sup>",
+  geojson_data$neighbourhood,df_insight_merged$num_accomodation,df_insight_merged$median_price,
+  df_insight_merged$average_price,df_insight_merged$sd,df_insight_merged$tot_crime_mille,df_insight_merged$crime_level
+) %>% lapply(htmltools::HTML)
+
+
+map<-leaflet(geojson_data) %>%
+  addCircles(lat = ~dft2$latitude, lng = ~dft2$longitude,
+             radius = 30,
+             weight = 20,
+             stroke = FALSE,
+             fillOpacity = 0.5,
+             color = ~pal(dft2$room_type)) %>%
+  addLegendCustom(colors = c("blue","darkred"), 
+                  labels = c("Entire home/apt","Private room"), sizes = c(10, 10))%>%
+  addControl("Fonti dati: Inside Airbnb & Metropolitan Police", position = "bottomleft") %>%
+  addLegend("bottomright",pal=pal2,values=dfc1$crime_level,title="Crime Level") %>%
+  addTiles() %>%
+  addPolygons(weight = 2,
+              color = ~pal1(geojson_data$neighbourhood),
+              dashArray = "1",
+              fillOpacity = 0.2,
+              highlightOptions = highlightOptions(
+                weight = 5,
+                color = ~pal(dft2$room_type),
+                dashArray = "",
+                fillOpacity = 0.5,
+                bringToFront = TRUE),
+              label = labels,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "9px",
+                direction = "auto")) %>%
+  addProviderTiles("CartoDB.Positron")
+
+map
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
